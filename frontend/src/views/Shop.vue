@@ -2,7 +2,9 @@
   <div class="shop">
     <div v-if="shop" class="shop-header">
       <div class="shop-banner">
-        <img :src="shop.imageUrl || 'https://via.placeholder.com/1200x400'" :alt="shop.name" />
+        <div class="shop-icon-large">
+          <FoodIcon :type="getShopIconType(shop.name)" />
+        </div>
         <div class="shop-info-overlay">
           <h2 class="shop-name">{{ shop.name }}</h2>
           <p class="shop-description">{{ shop.description }}</p>
@@ -22,8 +24,8 @@
       <h3 class="section-title">菜单</h3>
       <div class="dishes-container">
         <div v-for="dish in dishes" :key="dish.id" class="dish-card">
-          <div class="dish-image">
-            <img :src="dish.imageUrl || 'https://via.placeholder.com/200x200'" :alt="dish.name" />
+          <div class="dish-icon-wrapper">
+            <FoodIcon :type="getDishIconType(dish.name)" />
           </div>
           <div class="dish-info">
             <h4 class="dish-name">{{ dish.name }}</h4>
@@ -53,12 +55,35 @@
           </div>
           <div class="cart-item-quantity">
             <button @click="updateQuantity(item.dishId, item.quantity - 1)" :disabled="item.quantity <= 1">-</button>
-            <span>{{ item.quantity }}</span>
+            <input 
+              type="number" 
+              v-model.number="item.quantity" 
+              @blur="validateQuantity(item)"
+              min="1" 
+              class="quantity-input"
+            />
             <button @click="updateQuantity(item.dishId, item.quantity + 1)">+</button>
           </div>
           <button @click="removeFromCart(item.dishId)" class="remove-item-btn">删除</button>
         </div>
       </div>
+      
+      <!-- 收货信息 -->
+      <div class="cart-info">
+        <div class="form-group">
+          <label class="form-label">收货地址 <span class="required">*</span></label>
+          <textarea v-model="address" class="form-textarea" placeholder="请输入收货地址" required></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">联系电话 <span class="required">*</span></label>
+          <input v-model="phone" type="tel" class="form-input" placeholder="请输入联系电话" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">备注</label>
+          <textarea v-model="remark" class="form-textarea" placeholder="请输入备注信息（如：少辣、多加酱等）"></textarea>
+        </div>
+      </div>
+      
       <div class="cart-total">
         <span>总计：</span>
         <span class="total-price">¥{{ totalPrice }}</span>
@@ -72,6 +97,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
+import FoodIcon from '../components/FoodIcon.vue'
+import { getShopIcon, getFoodIcon } from '../utils/imageHelper'
+
+const getShopIconType = (shopName: string) => {
+  return getShopIcon(shopName)
+}
+
+const getDishIconType = (dishName: string) => {
+  return getFoodIcon(dishName)
+}
 
 interface Shop {
   id: number
@@ -113,6 +148,11 @@ const shop = ref<Shop | null>(null)
 const dishes = ref<Dish[]>([])
 const cart = ref<CartItem[]>([])
 
+// 收货信息
+const address = ref('')
+const phone = ref('')
+const remark = ref('')
+
 const totalPrice = computed(() => {
   return cart.value.reduce((total, item) => total + item.price * item.quantity, 0).toFixed(2)
 })
@@ -133,6 +173,12 @@ const fetchDishes = async () => {
   } catch (error) {
     console.error('Failed to fetch dishes:', error)
   }
+}
+
+// 图片加载失败处理
+const handleImageError = (event: Event) => {
+  const target = event.target as HTMLImageElement
+  target.style.display = 'none'
 }
 
 const addToCart = (dish: Dish) => {
@@ -157,12 +203,38 @@ const updateQuantity = (dishId: number, quantity: number) => {
   }
 }
 
+const validateQuantity = (item: CartItem) => {
+  if (!item.quantity || item.quantity <= 0) {
+    item.quantity = 1
+  }
+}
+
 const removeFromCart = (dishId: number) => {
   cart.value = cart.value.filter(item => item.dishId !== dishId)
 }
 
 const placeOrder = async () => {
-  const userId = 1 // 简化处理，实际应该从登录状态获取
+  const userStr = localStorage.getItem('user')
+  if (!userStr) {
+    alert('请先登录')
+    router.push('/login')
+    return
+  }
+  
+  // 验证收货地址必填
+  if (!address.value.trim()) {
+    alert('请输入收货地址')
+    return
+  }
+  
+  // 验证手机号必填
+  if (!phone.value.trim()) {
+    alert('请输入联系电话')
+    return
+  }
+  
+  const user = JSON.parse(userStr)
+  const userId = user.id
   const orderItems = cart.value.map(item => ({
     dishId: item.dishId,
     quantity: item.quantity,
@@ -174,22 +246,37 @@ const placeOrder = async () => {
       userId,
       shopId: Number(shopId.value),
       totalPrice: Number(totalPrice.value),
-      address: '收货地址', // 实际应该从用户信息获取
-      phone: '13800138000' // 实际应该从用户信息获取
+      address: address.value || user.address || '收货地址',
+      phone: phone.value || user.phone || '13800138000',
+      remark: remark.value
     },
     orderItems
   }
 
   try {
     const response = await axios.post('/api/orders', orderData)
-    if (response.status === 201) {
-      alert('订单提交成功！')
-      cart.value = []
-      router.push('/orders')
+    // 检查响应状态是否成功（200或201）
+    if (response.status === 201 || response.status === 200) {
+      if (response.data && response.data.id) {
+        alert('订单提交成功！')
+        cart.value = []
+        address.value = ''
+        phone.value = ''
+        remark.value = ''
+        router.push('/orders')
+      } else {
+        throw new Error('订单数据不完整')
+      }
+    } else {
+      throw new Error(`请求失败，状态码: ${response.status}`)
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to place order:', error)
-    alert('订单提交失败，请稍后重试')
+    // 区分网络错误和业务错误
+    const errorMessage = error.response?.data?.message || 
+                         error.message || 
+                         '订单提交失败，请稍后重试'
+    alert(errorMessage)
   }
 }
 
@@ -215,10 +302,18 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.shop-banner img {
+.shop-icon-large {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #FFD100, #FFB800);
+}
+
+.shop-icon-large .food-icon {
+  width: 150px;
+  height: 150px;
 }
 
 .shop-info-overlay {
@@ -297,15 +392,11 @@ onMounted(() => {
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
 
-.dish-image {
-  height: 200px;
-  overflow: hidden;
-}
-
-.dish-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.dish-icon-wrapper {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .dish-info {
@@ -419,9 +510,19 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.cart-item-quantity span {
-  min-width: 30px;
+.cart-item-quantity .quantity-input {
+  min-width: 50px;
+  max-width: 70px;
   text-align: center;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  font-size: 1rem;
+  outline: none;
+}
+
+.cart-item-quantity .quantity-input:focus {
+  border-color: #ff6b6b;
 }
 
 .remove-item-btn {
@@ -432,6 +533,77 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 0.9rem;
   cursor: pointer;
+}
+
+.cart-info {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.required {
+  color: #e74c3c;
+  margin-left: 4px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  color: #333;
+  box-sizing: border-box;
+  transition: border-color 0.3s ease;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #ff6b6b;
+}
+
+.form-input::placeholder {
+  color: #999;
+}
+
+.form-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  color: #333;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.3s ease;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: #ff6b6b;
+}
+
+.form-textarea::placeholder {
+  color: #999;
 }
 
 .cart-total {

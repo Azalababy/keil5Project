@@ -34,6 +34,9 @@ public class Shop {
     @Column(nullable = false, columnDefinition = "ENUM('open', 'closed') DEFAULT 'open'")
     private Status status = Status.open;
 
+    @Column(nullable = false, length = 255)
+    private String password;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

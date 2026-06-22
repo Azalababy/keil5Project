@@ -30,6 +30,9 @@ public class Dish {
     @Column(name = "image_url", length = 255)
     private String imageUrl;
 
+    @Column(name = "category_id")
+    private Long categoryId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, columnDefinition = "ENUM('available', 'unavailable') DEFAULT 'available'")
     private Status status = Status.available;
